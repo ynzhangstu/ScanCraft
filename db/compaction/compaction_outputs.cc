@@ -10,7 +10,7 @@
 
 #include "db/compaction/compaction_outputs.h"
 
-#include "db/sbc_buffer.h"
+#include "db/uni_scheduler.h"
 #include "db/builder.h"
 
 namespace ROCKSDB_NAMESPACE {

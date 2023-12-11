@@ -12,6 +12,10 @@
 #include "table/block_based/block_prefetcher.h"
 #include "table/block_based/reader_common.h"
 
+#include "db/uni_scheduler.h"
+#include "monitoring/iostats_context_imp.h"
+
+#include <pthread.h>
 #include <queue>
 
 // #define DISP_OFF
@@ -97,6 +101,7 @@ class BlockBasedTableIteratorSBC : public InternalIteratorBase<Slice> {
           key_buf_.reserve(kKeyBufferSize + 100);
           scan_len = read_options_.scan_len;
           aligned_buf_.reserve(10);
+          // std::cout << "CMS iterator start.\n";
         }
 
   ~BlockBasedTableIteratorSBC() {
@@ -266,8 +271,33 @@ class BlockBasedTableIteratorSBC : public InternalIteratorBase<Slice> {
     }
 
     aligned_buf_.emplace_back(rocksdb::AlignedBuf());
-    table_->get_rep()->file->Read(opts, block_start_offset_, n, &data_block_buffer_, 
-      &scratch, &aligned_buf_.back(), read_options_.rate_limiter_priority);
+    // TODO: 交给Uni-scheduler
+    if(read_options_.uni_scheduler_type == 3) {
+      // InstrumentedMutex mu_kv_buf_;
+      // InstrumentedCondVar cv_(&mu_kv_buf_);
+      // SBCIOContex io_ctx_;
+
+      // io_ctx_.offset_ = block_start_offset_;
+      // table_->get_rep()->file->GetIOCtx(&io_ctx_);
+
+      // io_ctx_.cond_var_ = &cv_;
+      // io_ctx_.weight_ = 2;
+      // io_ctx_.op_code_ = LIO_READ;
+      // io_ctx_.file_number_ = table_->get_rep()->sst_number_for_tracing();
+
+      // read_options_.uni_scheduler->SubmitIOCtx(&io_ctx_);
+      // cv_.Wait();
+      // FIXME: 这是一个临时解决方案，让读操作自己等到IO压力小的时候执行
+      while (GET_IO_DEPTH >= MAX_SCHEDULE_IO_DEPTH) {
+        PAUSE();
+      }
+      table_->get_rep()->file->Read(opts, block_start_offset_, n, &data_block_buffer_, 
+            &scratch, &aligned_buf_.back(), read_options_.rate_limiter_priority);
+    } else {
+      table_->get_rep()->file->Read(opts, block_start_offset_, n, &data_block_buffer_, 
+            &scratch, &aligned_buf_.back(), read_options_.rate_limiter_priority);
+    }
+    
     
     scratch_ = data_block_buffer_.data_;
     left_ = data_block_buffer_.size();
@@ -318,7 +348,7 @@ class BlockBasedTableIteratorSBC : public InternalIteratorBase<Slice> {
   const InternalKeyComparator& icomp_;
   UserComparatorWrapper user_comparator_;
   PinnedIteratorsManager* pinned_iters_mgr_;
-  DataBlockIter block_iter_;
+  SBCDataBlockIter block_iter_;
   const SliceTransform* prefix_extractor_;
   uint64_t prev_block_offset_ = std::numeric_limits<uint64_t>::max();
   BlockCacheLookupContext lookup_context_;

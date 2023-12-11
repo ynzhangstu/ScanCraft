@@ -76,7 +76,7 @@ class FlushJob {
            const SeqnoToTimeMapping& seq_time_mapping,
            const std::string& db_id = "", const std::string& db_session_id = "",
            std::string full_history_ts_low = "",
-           BlobFileCompletionCallback* blob_callback = nullptr, SBCBuffer *sbc_buffer = nullptr);
+           BlobFileCompletionCallback* blob_callback = nullptr, UniScheduler *uni_scheduler = nullptr);
 
   ~FlushJob();
 
@@ -198,7 +198,7 @@ class FlushJob {
   // db mutex
   const SeqnoToTimeMapping& db_impl_seqno_time_mapping_;
   SeqnoToTimeMapping seqno_to_time_mapping_;
-  SBCBuffer *sbc_buffer_;
+  UniScheduler *uni_scheduler_;
 };
 
 }  // namespace ROCKSDB_NAMESPACE

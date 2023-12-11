@@ -19,7 +19,7 @@
 #include <utility>
 #include <vector>
 
-#include "db/sbc_buffer.h"
+#include "db/uni_scheduler.h"
 #include "db/column_family.h"
 #include "db/compaction/compaction_iterator.h"
 #include "db/compaction/compaction_job.h"
@@ -1273,7 +1273,7 @@ class DBImpl : public DB {
   Status init_logger_creation_s_;
   const DBOptions initial_db_options_;
   Env* const env_;
-  SBCBuffer *sbc_buffer_;
+  UniScheduler *uni_scheduler_;
   std::shared_ptr<IOTracer> io_tracer_;
   const ImmutableDBOptions immutable_db_options_;
   FileSystemPtr fs_;

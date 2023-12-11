@@ -20,6 +20,7 @@
 #include "test_util/sync_point.h"
 #include "util/random.h"
 #include "util/rate_limiter.h"
+#include "db/uni_scheduler.h"
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -241,6 +242,13 @@ IOStatus RandomAccessFileReader::Read(
 
   return io_s;
 }
+
+// TODO: 以后补
+void RandomAccessFileReader::GetIOCtx(SBCIOContex *io_ctx_) {
+  io_ctx_->fd_ = file_->GetFD();
+  // io_ctx_->data_;
+}
+
 
 size_t End(const FSReadRequest& r) {
   return static_cast<size_t>(r.offset) + r.len;

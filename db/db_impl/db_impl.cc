@@ -162,7 +162,7 @@ DBImpl::DBImpl(const DBOptions& options, const std::string& dbname,
       initial_db_options_(SanitizeOptions(dbname, options, read_only,
                                           &init_logger_creation_s_)),
       env_(initial_db_options_.env),
-      sbc_buffer_(nullptr),
+      uni_scheduler_(nullptr),
       io_tracer_(std::make_shared<IOTracer>()),
       immutable_db_options_(initial_db_options_),
       fs_(immutable_db_options_.fs, io_tracer_),
@@ -253,7 +253,7 @@ DBImpl::DBImpl(const DBOptions& options, const std::string& dbname,
       blob_callback_(immutable_db_options_.sst_file_manager.get(), &mutex_,
                      &error_handler_, &event_logger_,
                      immutable_db_options_.listeners, dbname_) {
-  sbc_buffer_ = new SBCBuffer(1ll<<30, immutable_db_options_);
+  uni_scheduler_ = new UniScheduler(1ll<<30, immutable_db_options_);
   // !batch_per_trx_ implies seq_per_batch_ because it is only unset for
   // WriteUnprepared, which should use seq_per_batch_.
   assert(batch_per_txn_ || seq_per_batch_);
@@ -753,7 +753,7 @@ DBImpl::~DBImpl() {
   // TODO: remove this.
   init_logger_creation_s_.PermitUncheckedError();
 
-  delete sbc_buffer_;
+  delete uni_scheduler_;
 
   InstrumentedMutexLock closing_lock_guard(&closing_mutex_);
   if (closed_) {
@@ -1864,9 +1864,15 @@ InternalIterator* DBImpl::NewInternalIterator(
   if (s.ok()) {
     // Collect iterators for files in L0 - Ln
     if (read_options.read_tier != kMemtableTier) {
+      SBCContex sbc_ctx;
+      if(immutable_db_options_.partitial_cache_pypath) {
+        cfd->current()->storage_info()->GetCMSboundary(
+          cfd->table_cache()->GetHotSpotSize(), sbc_ctx.boundary);
+      }
+
       super_version->current->AddIterators(read_options, file_options_,
                                            &merge_iter_builder,
-                                           allow_unprepared_value, false);
+                                           allow_unprepared_value, sbc_ctx);
     }
     internal_iter = merge_iter_builder.Finish(
         read_options.ignore_range_deletions ? nullptr : db_iter);
@@ -3504,10 +3510,16 @@ Iterator* DBImpl::NewSBCIterator(ReadOptions& options,
     if (status.ok()) {
       // Collect iterators for files in L0 - Ln
       if (options.read_tier != kMemtableTier) {
-        // 这里面的iterator要清楚自己是否是需要合并的
+        SBCContex sbc_ctx;
+        if(immutable_db_options_.partitial_cache_pypath) {
+          cfd->current()->storage_info()->GetCMSboundary(
+            cfd->table_cache()->GetHotSpotSize(), sbc_ctx.boundary);
+        }
+        cfd->current()->storage_info()->GetSBCLevelRange(sbc_ctx.sbc_start_level, sbc_ctx.sbc_end_level);
+        sbc_ctx.all_from_comp_sst = (begin == nullptr && end == nullptr);
         sv->current->AddIterators(options, file_options_,
                                             &merge_iter_builder,
-                                            true, (begin == nullptr && end == nullptr));
+                                            true, sbc_ctx);
       }
 
       // 判断这个scan是否要转换成compaction
@@ -3589,7 +3601,7 @@ Iterator* DBImpl::NewSBCIterator(ReadOptions& options,
             kManualCompactionCanceledFalse_, db_id_, db_session_id_,
             compaction->column_family_data()->GetFullHistoryTsLow(), compaction->trim_ts(),
             &blob_callback_, &bg_compaction_scheduled_,
-            &bg_bottom_compaction_scheduled_, sbc_buffer_);
+            &bg_bottom_compaction_scheduled_, uni_scheduler_);
 
             compaction_job->SetKeyRange(begin_storage, end_storage);
             // 准备sub compaction

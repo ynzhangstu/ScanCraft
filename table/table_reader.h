@@ -60,6 +60,14 @@ class TableReader {
       size_t compaction_readahead_size = 0,
       bool allow_unprepared_value = false) = 0;
 
+  virtual InternalIterator* NewIteratorCMS(
+      const ReadOptions& read_options, const SliceTransform* prefix_extractor,
+      Arena* arena, bool skip_filters, TableReaderCaller caller, bool disable_sbc_iter,
+      size_t compaction_readahead_size = 0,
+      bool allow_unprepared_value = false) {
+        abort();
+      }
+
   virtual FragmentedRangeTombstoneIterator* NewRangeTombstoneIterator(
       const ReadOptions& /*read_options*/) {
     return nullptr;

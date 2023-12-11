@@ -760,8 +760,9 @@ ImmutableDBOptions::ImmutableDBOptions(const DBOptions& options)
       compaction_service(options.compaction_service),
       enforce_single_del_contracts(options.enforce_single_del_contracts),
       enable_sbc(options.enable_sbc),
-      use_sbc_buffer(options.use_sbc_buffer),
-      compaction_with_fast_scan(options.compaction_with_fast_scan) {
+      use_uni_scheduler(options.use_uni_scheduler),
+      compaction_with_fast_scan(options.compaction_with_fast_scan),
+      partitial_cache_pypath(options.partitial_cache_pypath) {
   fs = env->GetFileSystem();
   clock = env->GetSystemClock().get();
   logger = info_log.get();
@@ -935,8 +936,8 @@ void ImmutableDBOptions::Dump(Logger* log) const {
                    enforce_single_del_contracts ? "true" : "false");
   ROCKS_LOG_HEADER(log, "           Options.enable_sbc: %s", 
                    enable_sbc ? "true" : "false");
-  ROCKS_LOG_HEADER(log, "           Options.use_sbc_buffer: %d", 
-                   use_sbc_buffer);
+  ROCKS_LOG_HEADER(log, "           Options.use_uni_scheduler: %d", 
+                   use_uni_scheduler);
   ROCKS_LOG_HEADER(log, "           Options.compaction_with_fast_scan: %s", 
                    compaction_with_fast_scan ? "true" : "false");
 

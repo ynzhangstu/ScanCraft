@@ -62,6 +62,17 @@
 #include "util/coro_utils.h"
 #include "util/hash_containers.h"
 
+// 用于判断一个迭代器要不要合并，以及要不要用CMS
+struct SBCContex{
+  bool all_from_comp_sst = false;
+  bool from_comp_sst = false;
+  bool disable_sbc_iter = false;
+
+  int sbc_start_level = 1000;
+  int sbc_end_level = 1000;
+  int boundary = -1;      // 
+};
+
 namespace ROCKSDB_NAMESPACE {
 
 namespace log {
@@ -192,6 +203,8 @@ class VersionStorageInfo {
                               const MutableCFOptions& mutable_cf_options);
 
   void GetSBCLevelRange(int &start, int &end);
+
+  void GetCMSboundary(uint64_t hot_spot_size, int &boundary);
 
   // Estimate est_comp_needed_bytes_
   void EstimateCompactionBytesNeeded(
@@ -728,6 +741,7 @@ class VersionStorageInfo {
   int sbc_start_;
   int sbc_end_;
   int max_profile_;
+  uint64_t level_size_arr_[10];
 
   friend class Version;
   friend class VersionSet;
@@ -807,14 +821,14 @@ class Version {
   void AddIterators(const ReadOptions& read_options,
                     const FileOptions& soptions,
                     MergeIteratorBuilder* merger_iter_builder,
-                    bool allow_unprepared_value, bool from_comp_sst);
+                    bool allow_unprepared_value, SBCContex &sbc_contex);
 
   // @param read_options Must outlive any iterator built by
   // `merger_iter_builder`.
   void AddIteratorsForLevel(const ReadOptions& read_options,
                             const FileOptions& soptions,
                             MergeIteratorBuilder* merger_iter_builder,
-                            int level, bool allow_unprepared_value, bool from_comp_sst);
+                            int level, bool allow_unprepared_value, SBCContex &sbc_contex);
 
   Status OverlapWithLevelIterator(const ReadOptions&, const FileOptions&,
                                   const Slice& smallest_user_key,

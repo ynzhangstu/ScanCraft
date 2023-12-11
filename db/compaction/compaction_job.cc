@@ -146,7 +146,7 @@ CompactionJob::CompactionJob(
     const std::string& db_id, const std::string& db_session_id,
     std::string full_history_ts_low, std::string trim_ts,
     BlobFileCompletionCallback* blob_callback, int* bg_compaction_scheduled,
-    int* bg_bottom_compaction_scheduled, SBCBuffer *sbc_buffer)
+    int* bg_bottom_compaction_scheduled, UniScheduler *uni_scheduler)
     : compact_(new CompactionState(compaction)),
       compaction_stats_(compaction->compaction_reason(), 1),
       db_options_(db_options),
@@ -181,7 +181,7 @@ CompactionJob::CompactionJob(
       table_cache_(std::move(table_cache)),
       event_logger_(event_logger),
       files_need_flush_(200),
-      sbc_buffer_(sbc_buffer), // NOTE: 在createsbciter的时候赋值
+      uni_scheduler_(uni_scheduler), // NOTE: 在createsbciter的时候赋值
       sbc_key_value_buffer_(nullptr), // NOTE: 在createsbciter的时候赋值
       cv_kv_buf_(&mu_kv_buf_),
       sbc_running_(false),
@@ -1079,7 +1079,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
 
   ColumnFamilyData* cfd = sub_compact->compaction->column_family_data();
 
-  if(db_options_.use_sbc_buffer == 3) {
+  if(db_options_.use_uni_scheduler == 3) {
     sbc_running_ = true;
     auto SBCWorker = [this, sub_compact]() {
       this->FlushSSTable(sub_compact);
@@ -1129,6 +1129,11 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   read_options.total_order_seek = true;
 
   read_options.fast_scan = db_options_.compaction_with_fast_scan;
+
+  // read_options.for_compaction = true;
+
+  read_options.uni_scheduler_type = db_options_.use_uni_scheduler;
+  read_options.uni_scheduler = uni_scheduler_;
 
   // Remove the timestamps from boundaries because boundaries created in
   // GenSubcompactionBoundaries doesn't strip away the timestamp.
@@ -1343,7 +1348,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
     // and `close_file_func`.
     // TODO: it would be better to have the compaction file open/close moved
     // into `CompactionOutputs` which has the output file information.
-    if(db_options_.use_sbc_buffer == 3) {
+    if(db_options_.use_uni_scheduler == 3) {
       status = sub_compact->AddToOutput(*c_iter, open_file_func, submit_file_func);
     } else {
       status = sub_compact->AddToOutput(*c_iter, open_file_func, close_file_func);
@@ -1363,7 +1368,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
     }
   }
 
-  if(db_options_.use_sbc_buffer == 3) {
+  if(db_options_.use_uni_scheduler == 3) {
     ROCKS_LOG_INFO(db_options_.info_log,
                  "[%s] [JOB %d] Iterator finished, wait Flush SSTables",
                  cfd->GetName().c_str(), job_id_);
@@ -1507,15 +1512,15 @@ Status CompactionJob::CreateSBCIterator(InternalIterator *input) {
 
   is_sbc_job_ = true;
 
-  // KVBuffer + SBCBuffer
-  if(db_options_.use_sbc_buffer == 1) {
+  // KVBuffer + UniScheduler
+  if(db_options_.use_uni_scheduler == 1) {
     sbc_running_ = true;
-    sbc_key_value_buffer_ = sbc_buffer_->GetSBCKeyValueBuffer();
+    sbc_key_value_buffer_ = uni_scheduler_->GetSBCKeyValueBuffer();
     auto SBCWorker = [this]() {
       this->AddKeyValueFromKVBuffer();
     };
     sbc_worker = std::thread(SBCWorker);
-  } else if(db_options_.use_sbc_buffer == 2 || db_options_.use_sbc_buffer == 3) {
+  } else if(db_options_.use_uni_scheduler == 2 || db_options_.use_uni_scheduler == 3) {
     sbc_running_ = true;
     auto SBCWorker = [this, sub_compact]() {
       this->FlushSSTable(sub_compact);
@@ -1545,7 +1550,7 @@ Status CompactionJob::AddKeyValue() {
       return this->OpenCompactionOutputFile(sub_compact, outputs);
     };
 
-  if(db_options_.use_sbc_buffer == 1) {
+  if(db_options_.use_uni_scheduler == 1) {
     // NOTE: 将健值对塞进缓冲区就退出
     auto in_stat = SBC_iter_->InputStatus();
     if(!in_stat.ok()) {
@@ -1558,8 +1563,8 @@ Status CompactionJob::AddKeyValue() {
       cv_kv_buf_.Signal();
     }
 
-  } else if(db_options_.use_sbc_buffer == 2 || db_options_.use_sbc_buffer == 3) {
-    // 使用SBCBuffer，但是只缓存文件
+  } else if(db_options_.use_uni_scheduler == 2 || db_options_.use_uni_scheduler == 3) {
+    // 使用UniScheduler，但是只缓存文件
     const CompactionFileCloseFunc close_file_func =
       [this, sub_compact](CompactionOutputs& outputs, const Status& status,
                           const Slice& next_table_min_key) {
@@ -1568,7 +1573,7 @@ Status CompactionJob::AddKeyValue() {
       };
     s = sub_compact->AddToOutput(*SBC_iter_, open_file_func, close_file_func);
   } else {
-    // 不使用SBCBuffer，use_sbc_buffer = 0
+    // 不使用UniScheduler，use_uni_scheduler = 0
     const CompactionFileCloseFunc close_file_func =
       [this, sub_compact](CompactionOutputs& outputs, const Status& status,
                           const Slice& next_table_min_key) {
@@ -1678,7 +1683,7 @@ void CompactionJob::RecordDroppedKeys(
   }
 }
 
-// TODO: 提交完就可以结束了，后续任务应该交给SBCBuffer做
+// TODO: 提交完就可以结束了，后续任务应该交给UniScheduler做
 Status CompactionJob::SBCSubmitFinishCompactionOutputFile(
     const Status& input_status, SubcompactionState* sub_compact,
     CompactionOutputs& outputs, const Slice& next_table_min_key) {
@@ -1828,7 +1833,7 @@ Status CompactionJob::SBCSubmitFinishCompactionOutputFile(
 
 Status CompactionJob::FlushSSTable(SubcompactionState* sub_compact) {
   Status s = Status::OK();
-  assert(sbc_buffer_);
+  assert(uni_scheduler_);
   ColumnFamilyData* cfd = sub_compact->compaction->column_family_data();
 
   ROCKS_LOG_INFO(db_options_.info_log,
@@ -1853,7 +1858,7 @@ Status CompactionJob::FlushSSTable(SubcompactionState* sub_compact) {
     }
     assert(sst_file);
   
-    // 1 先把outfile里的数据推到SBCBuffer内
+    // 1 先把outfile里的数据推到UniScheduler内
     // 2 把sst_file塞到队列尾部
     // 2 如果文件全部被刷入磁盘就继续下面的操作：
 
@@ -1870,7 +1875,7 @@ Status CompactionJob::FlushSSTable(SubcompactionState* sub_compact) {
       sst_file->io_ctx_.op_code_ = LIO_WRITE;
       sst_file->io_ctx_.file_number_ = sst_file->output_->meta.fd.GetNumber();
       sst_file->outfile_->GetIOCtx(&sst_file->io_ctx_);
-      sbc_buffer_->SubmitIOCtx(&sst_file->io_ctx_);
+      uni_scheduler_->SubmitIOCtx(&sst_file->io_ctx_);
       files_need_flush_.push(sst_file);
       // std::cout << "Submit AIO req number: " << sst_file->io_ctx_.file_number_ 
       //   << ", size: " << sst_file->io_ctx_.data_.size() << "\n";
@@ -1899,7 +1904,7 @@ Status CompactionJob::FlushSSTable(SubcompactionState* sub_compact) {
         sst_file->io_ctx_.op_code_ = LIO_WRITE;
         sst_file->io_ctx_.file_number_ = sst_file->output_->meta.fd.GetNumber();
         sst_file->outfile_->GetIOCtx(&sst_file->io_ctx_);
-        sbc_buffer_->SubmitIOCtx(&sst_file->io_ctx_);
+        uni_scheduler_->SubmitIOCtx(&sst_file->io_ctx_);
         files_need_flush_.push(sst_file);
         // std::cout << "Submit AIO req number: " << sst_file->io_ctx_.file_number_ 
         //   << ", size:" << sst_file->io_ctx_.data_.size() << "\n";
@@ -2212,8 +2217,8 @@ Status CompactionJob::FinishSBCJob() {
   SubcompactionState* sub_compact = &compact_->sub_compact_states[0];
   ColumnFamilyData* cfd = sub_compact->compaction->column_family_data();
 
-  // 把SBCbuffer的工作线程停下
-  if(db_options_.use_sbc_buffer == 1) {
+  // 把UniScheduler的工作线程停下
+  if(db_options_.use_uni_scheduler == 1) {
     ROCKS_LOG_INFO(db_options_.info_log,
                  "[%s] [JOB %d] Iterator finished, wait SBC worker",
                  cfd->GetName().c_str(), job_id_);
@@ -2221,7 +2226,7 @@ Status CompactionJob::FinishSBCJob() {
     cv_kv_buf_.Signal();
     sbc_worker.join();
     delete sbc_key_value_buffer_;
-  } else if(db_options_.use_sbc_buffer == 2 || db_options_.use_sbc_buffer == 3) {
+  } else if(db_options_.use_uni_scheduler == 2 || db_options_.use_uni_scheduler == 3) {
     ROCKS_LOG_INFO(db_options_.info_log,
                  "[%s] [JOB %d] Iterator finished, wait Flush SSTables",
                  cfd->GetName().c_str(), job_id_);
@@ -2611,7 +2616,7 @@ Status CompactionJob::OpenCompactionOutputFile(SubcompactionState* sub_compact,
         sub_compact->compaction->mutable_cf_options()->last_level_temperature;
   }
   fo_copy.temperature = temperature;
-  if(db_options_.use_sbc_buffer == 2 || db_options_.use_sbc_buffer == 3) {
+  if(db_options_.use_uni_scheduler == 2 || db_options_.use_uni_scheduler == 3) {
     fo_copy.writable_file_max_buffer_size = 
       sub_compact->compaction->max_output_file_size() + (1ll<<20);
   }

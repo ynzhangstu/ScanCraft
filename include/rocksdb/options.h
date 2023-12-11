@@ -56,6 +56,7 @@ class Statistics;
 class InternalKeyComparator;
 class WalFilter;
 class FileSystem;
+class UniScheduler;
 
 struct Options;
 struct DbPath;
@@ -843,7 +844,7 @@ struct DBOptions {
   // Use O_DIRECT for writes in background flush and compactions.
   // Default: false
   // Not supported in ROCKSDB_LITE mode!
-  bool use_direct_io_for_flush_and_compaction = false;
+  bool use_direct_io_for_flush_and_compaction = true;
 
   // If false, fallocate() calls are bypassed, which disables file
   // preallocation. The file space preallocation is used to increase the file
@@ -1405,9 +1406,11 @@ struct DBOptions {
   bool enable_sbc = false;
 
   //  0 disable, 1 KVBuffer, 2 SBC File buffer, 3 Uni-buffer
-  int use_sbc_buffer = 0;
+  int use_uni_scheduler = 0;
 
   bool compaction_with_fast_scan = false;
+
+  bool partitial_cache_pypath = false;
 
   size_t sbc_threshold_high = 1ll << 30;
 };
@@ -1718,6 +1721,12 @@ struct ReadOptions {
 
   // Default: false
   bool fast_scan;
+
+  // bool for_compaction;
+
+  int uni_scheduler_type = 0;
+
+  UniScheduler *uni_scheduler = nullptr;
 
   // Default: INT64_MAX
   size_t scan_len;

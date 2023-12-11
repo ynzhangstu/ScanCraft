@@ -10,7 +10,7 @@
 
 #include "db/compaction/subcompaction_state.h"
 
-#include "db/sbc_buffer.h"
+#include "db/uni_scheduler.h"
 #include "rocksdb/sst_partitioner.h"
 
 namespace ROCKSDB_NAMESPACE {

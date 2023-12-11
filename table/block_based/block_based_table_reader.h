@@ -132,6 +132,13 @@ class BlockBasedTable : public TableReader {
                                 size_t compaction_readahead_size = 0,
                                 bool allow_unprepared_value = false) override;
 
+  InternalIterator* NewIteratorCMS(const ReadOptions&,
+                                const SliceTransform* prefix_extractor,
+                                Arena* arena, bool skip_filters,
+                                TableReaderCaller caller, bool disable_sbc_iter,
+                                size_t compaction_readahead_size = 0,
+                                bool allow_unprepared_value = false) override;
+
   FragmentedRangeTombstoneIterator* NewRangeTombstoneIterator(
       const ReadOptions& read_options) override;
 

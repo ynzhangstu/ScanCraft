@@ -1415,7 +1415,7 @@ Block::Block(BlockContents&& contents, size_t read_amp_bytes_per_bit,
     size_ = 0;  // Error marker
   } else {
     // Should only decode restart points for uncompressed blocks
-    num_restarts_ = NumRestarts();
+    num_restarts_ = NumRestarts();  // FIXME: 这里极其容易产生Page fault的问题
     switch (IndexType()) {
       case BlockBasedTableOptions::kDataBlockBinarySearch:
         restart_offset_ = static_cast<uint32_t>(size_) -

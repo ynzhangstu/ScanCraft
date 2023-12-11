@@ -37,6 +37,10 @@ class ReadaheadRandomAccessFile : public FSRandomAccessFile {
   ReadaheadRandomAccessFile& operator=(const ReadaheadRandomAccessFile&) =
       delete;
 
+  virtual int GetFD() const override {
+    return file_->GetFD();
+  }
+
   IOStatus Read(uint64_t offset, size_t n, const IOOptions& options,
                 Slice* result, char* scratch,
                 IODebugContext* dbg) const override {

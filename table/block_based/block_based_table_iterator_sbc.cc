@@ -107,8 +107,32 @@ void BlockBasedTableIteratorSBC::SeekImpl(const Slice* target,
     abort();
   }
   aligned_buf_.emplace_back(rocksdb::AlignedBuf());
-  table_->get_rep()->file->Read(opts, block_start_offset_, n, &data_block_buffer_, 
-    &scratch, &aligned_buf_.back(), read_options_.rate_limiter_priority);
+
+  // TODO: 交给Uni-scheduler
+  if(read_options_.uni_scheduler_type == 3) {
+    // InstrumentedMutex mu_kv_buf_;
+    // InstrumentedCondVar cv_(&mu_kv_buf_);
+    // SBCIOContex io_ctx_;
+
+    // io_ctx_.offset_ = block_start_offset_;
+    // table_->get_rep()->file->GetIOCtx(&io_ctx_);
+    
+    // io_ctx_.cond_var_ = &cv_;
+    // io_ctx_.weight_ = 2;
+    // io_ctx_.op_code_ = LIO_READ;
+    // io_ctx_.file_number_ = table_->get_rep()->sst_number_for_tracing();
+    // read_options_.uni_scheduler->SubmitIOCtx(&io_ctx_);
+    // cv_.Wait();
+    // FIXME: 这是一个临时解决方案，让读操作自己等到IO压力小的时候执行
+    while (GET_IO_DEPTH >= MAX_SCHEDULE_IO_DEPTH) {
+      PAUSE();
+    }
+    table_->get_rep()->file->Read(opts, block_start_offset_, n, &data_block_buffer_, 
+          &scratch, &aligned_buf_.back(), read_options_.rate_limiter_priority);
+  } else {
+    table_->get_rep()->file->Read(opts, block_start_offset_, n, &data_block_buffer_, 
+          &scratch, &aligned_buf_.back(), read_options_.rate_limiter_priority);
+  }
   
   scratch_ = data_block_buffer_.data_;
   left_ = data_block_buffer_.size();
@@ -185,7 +209,6 @@ inline void BlockBasedTableIteratorSBC::LoadKVFromBlock() {
     key_buf_.append(key.data(), key.size());
     kv_queue_.push(std::make_pair(Slice(key_buf_.c_str() + pos, key.size()), block_iter_.value()));
     block_iter_.Next();
-    block_iter_.PrefetchNextKey();
   } else {
     FindKeyForward();
   }
@@ -264,7 +287,7 @@ void BlockBasedTableIteratorSBC::InitDataBlock() {
       << index_iter_->value().handle.size() << " Left: " << left_
       << "\n";
 #endif
-    table_->NewDataBlockIteratorFromBuffer<DataBlockIter>(
+    table_->NewDataBlockIteratorFromBuffer<SBCDataBlockIter>(
         read_options_, data_block_handle, &block_iter_, BlockType::kData,
         /*get_context=*/nullptr, &lookup_context_,
         block_prefetcher_.prefetch_buffer(),
@@ -310,7 +333,7 @@ void BlockBasedTableIteratorSBC::AsyncInitDataBlock(bool is_first_pass) {
           read_options_.rate_limiter_priority);
 
       Status s;
-      table_->NewDataBlockIterator<DataBlockIter>(
+      table_->NewDataBlockIterator<SBCDataBlockIter>(
           read_options_, data_block_handle, &block_iter_, BlockType::kData,
           /*get_context=*/nullptr, &lookup_context_,
           block_prefetcher_.prefetch_buffer(),
@@ -325,7 +348,7 @@ void BlockBasedTableIteratorSBC::AsyncInitDataBlock(bool is_first_pass) {
     // Second pass will call the Poll to get the data block which has been
     // requested asynchronously.
     Status s;
-    table_->NewDataBlockIterator<DataBlockIter>(
+    table_->NewDataBlockIterator<SBCDataBlockIter>(
         read_options_, data_block_handle, &block_iter_, BlockType::kData,
         /*get_context=*/nullptr, &lookup_context_,
         block_prefetcher_.prefetch_buffer(),

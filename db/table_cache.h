@@ -85,7 +85,12 @@ class TableCache {
       size_t max_file_size_for_l0_meta_pin,
       const InternalKey* smallest_compaction_key,
       const InternalKey* largest_compaction_key, bool allow_unprepared_value,
-      TruncatedRangeDelIterator** range_del_iter = nullptr);
+      TruncatedRangeDelIterator** range_del_iter = nullptr, bool disable_sbc_iter = false);
+
+  size_t GetHotSpotSize() {
+    auto cache_size = cache_->GetCapacity();
+    return cache_size * hit_cache_cnt / (access_cache_cnt + 1);
+  }
 
   // If a seek to internal key "k" in specified file finds an entry,
   // call get_context->SaveValue() repeatedly until
@@ -270,6 +275,8 @@ class TableCache {
   Striped<port::Mutex, Slice> loader_mutex_;
   std::shared_ptr<IOTracer> io_tracer_;
   std::string db_session_id_;
+  uint64_t hit_cache_cnt;
+  uint64_t access_cache_cnt;
 };
 
 }  // namespace ROCKSDB_NAMESPACE

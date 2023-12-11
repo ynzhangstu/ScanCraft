@@ -24,6 +24,7 @@ namespace ROCKSDB_NAMESPACE {
 class Statistics;
 class HistogramImpl;
 class SystemClock;
+class SBCIOContex;
 
 using AlignedBuf = std::unique_ptr<char[]>;
 
@@ -178,6 +179,8 @@ class RandomAccessFileReader {
   IOStatus Read(const IOOptions& opts, uint64_t offset, size_t n, Slice* result,
                 char* scratch, AlignedBuf* aligned_buf,
                 Env::IOPriority rate_limiter_priority) const;
+
+  void GetIOCtx(SBCIOContex *io_ctx_);
 
   // REQUIRES:
   // num_reqs > 0, reqs do not overlap, and offsets in reqs are increasing.

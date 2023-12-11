@@ -298,6 +298,10 @@ class PosixRandomAccessFile : public FSRandomAccessFile {
   );
   virtual ~PosixRandomAccessFile();
 
+  virtual int GetFD() const override {
+    return fd_;
+  }
+
   virtual IOStatus Read(uint64_t offset, size_t n, const IOOptions& opts,
                         Slice* result, char* scratch,
                         IODebugContext* dbg) const override;

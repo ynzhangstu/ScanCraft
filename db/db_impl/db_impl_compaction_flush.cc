@@ -211,6 +211,11 @@ Status DBImpl::FlushMemTableToOutputFile(
   // To address this, we make sure NotifyOnFlushBegin() executes after memtable
   // picking so that no new snapshot can be taken between the two functions.
 
+  UniScheduler *uni_scheduler = nullptr;
+  if(immutable_db_options_.use_uni_scheduler == 3 || immutable_db_options_.use_uni_scheduler == 2) {
+    file_options_for_compaction_.writable_file_max_buffer_size = mutable_cf_options.write_buffer_size;
+    uni_scheduler = uni_scheduler_;
+  }
   FlushJob flush_job(
       dbname_, cfd, immutable_db_options_, mutable_cf_options, max_memtable_id,
       file_options_for_compaction_, versions_.get(), &mutex_, &shutting_down_,
@@ -220,7 +225,7 @@ Status DBImpl::FlushMemTableToOutputFile(
       &event_logger_, mutable_cf_options.report_bg_io_stats,
       true /* sync_output_directory */, true /* write_manifest */, thread_pri,
       io_tracer_, seqno_time_mapping_, db_id_, db_session_id_,
-      cfd->GetFullHistoryTsLow(), &blob_callback_, sbc_buffer_);
+      cfd->GetFullHistoryTsLow(), &blob_callback_, uni_scheduler);
   FileMetaData file_meta;
 
   Status s;
@@ -1417,7 +1422,7 @@ Status DBImpl::CompactFilesImpl(
       kManualCompactionCanceledFalse_, db_id_, db_session_id_,
       c->column_family_data()->GetFullHistoryTsLow(), c->trim_ts(),
       &blob_callback_, &bg_compaction_scheduled_,
-      &bg_bottom_compaction_scheduled_, sbc_buffer_);
+      &bg_bottom_compaction_scheduled_, uni_scheduler_);
 
   // Creating a compaction influences the compaction score because the score
   // takes running compactions into account (by skipping files that are already
@@ -3439,7 +3444,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
                   : kManualCompactionCanceledFalse_,
         db_id_, db_session_id_, c->column_family_data()->GetFullHistoryTsLow(),
         c->trim_ts(), &blob_callback_, &bg_compaction_scheduled_,
-        &bg_bottom_compaction_scheduled_, sbc_buffer_);
+        &bg_bottom_compaction_scheduled_, uni_scheduler_);
     compaction_job.Prepare();
 
     NotifyOnCompactionBegin(c->column_family_data(), c.get(), status,

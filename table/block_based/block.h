@@ -826,7 +826,6 @@ class SBCDataBlockIter final : public BlockIter<Slice> {
     read_amp_bitmap_ = read_amp_bitmap;
     last_bitmap_offset_ = current_ + 1;
     data_block_hash_index_ = data_block_hash_index;
-    sbc_key_buf_.reserve(1024);
     fast_scan_ = false;
   }
 
@@ -877,22 +876,17 @@ class SBCDataBlockIter final : public BlockIter<Slice> {
   void Next() override {
     NextImpl();
     UpdateKey();
-    SaveKey();
-  }
-
-  Slice KeyForKVBuff() {
-    return key_kv_buf_;
   }
 
   void SaveKey() {
-    if(Valid() && fast_scan_) {
-      auto k = key();
-      auto pos = sbc_key_buf_.size();
-      sbc_key_buf_.append(k.data(), k.size());
+    // if(Valid() && fast_scan_) {
+    //   auto k = key();
+    //   auto pos = sbc_key_buf_.size();
+    //   sbc_key_buf_.append(k.data(), k.size());
 
-      key_kv_buf_.data_ = sbc_key_buf_.c_str() + pos;
-      key_kv_buf_.size_ = k.size();
-    }
+    //   key_kv_buf_.data_ = sbc_key_buf_.c_str() + pos;
+    //   key_kv_buf_.size_ = k.size();
+    // }
   }
 
   Slice value() const override {
@@ -925,7 +919,6 @@ class SBCDataBlockIter final : public BlockIter<Slice> {
     prev_entries_keys_buff_.clear();
     prev_entries_.clear();
     prev_entries_idx_ = -1;
-    sbc_key_buf_.clear();
   }
 
  protected:
@@ -973,9 +966,7 @@ class SBCDataBlockIter final : public BlockIter<Slice> {
   std::string prev_entries_keys_buff_;
   std::vector<CachedPrevEntry> prev_entries_;
   int32_t prev_entries_idx_ = -1;
-  std::string sbc_key_buf_;
   bool fast_scan_;
-  Slice key_kv_buf_;
 
   DataBlockHashIndex* data_block_hash_index_;
 

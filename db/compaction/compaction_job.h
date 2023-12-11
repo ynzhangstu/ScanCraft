@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-#include "db/sbc_buffer.h"
+#include "db/uni_scheduler.h"
 #include "db/blob/blob_file_completion_callback.h"
 #include "db/column_family.h"
 #include "db/compaction/compaction_iterator.h"
@@ -169,7 +169,7 @@ class CompactionJob {
       std::string full_history_ts_low = "", std::string trim_ts = "",
       BlobFileCompletionCallback* blob_callback = nullptr,
       int* bg_compaction_scheduled = nullptr,
-      int* bg_bottom_compaction_scheduled = nullptr, SBCBuffer *sbc_buffer = nullptr);
+      int* bg_bottom_compaction_scheduled = nullptr, UniScheduler *uni_scheduler = nullptr);
 
   virtual ~CompactionJob();
 
@@ -191,7 +191,7 @@ class CompactionJob {
 
   Status MetaCut();
 
-  // NOTE: 这个是让SBCBuffer里的工作线程负责调用的函数
+  // NOTE: 这个是让UniScheduler里的工作线程负责调用的函数
   Status AddKeyValueFromKVBuffer();
 
   void SetKeyRange(InternalKey *begin_storage, InternalKey *end_storage) {
@@ -263,7 +263,7 @@ class CompactionJob {
   };
 
   friend class CompactionJobTestBase;
-  friend class SBCBuffer;
+  friend class UniScheduler;
 
   // Generates a histogram representing potential divisions of key ranges from
   // the input. It adds the starting and/or ending keys of certain input files
@@ -358,7 +358,7 @@ class CompactionJob {
 
   std::unique_ptr<rocksdb::CompactionIterator> SBC_iter_;
   LockFreeQueue<WriteFileData> files_need_flush_;
-  SBCBuffer *sbc_buffer_;
+  UniScheduler *uni_scheduler_;
   SBCKeyValueBuffer *sbc_key_value_buffer_;
   InstrumentedMutex mu_kv_buf_;
   InstrumentedCondVar cv_kv_buf_;

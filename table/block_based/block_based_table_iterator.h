@@ -41,7 +41,9 @@ class BlockBasedTableIterator : public InternalIteratorBase<Slice> {
         block_iter_points_to_real_block_(false),
         check_filter_(check_filter),
         need_upper_bound_check_(need_upper_bound_check),
-        async_read_in_progress_(false) {}
+        async_read_in_progress_(false) {
+          // std::cout << "Convertional iterator start.\n";
+        }
 
   ~BlockBasedTableIterator() {}
 

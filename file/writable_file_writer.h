@@ -11,7 +11,7 @@
 #include <atomic>
 #include <string>
 
-#include "db/sbc_buffer.h"
+#include "db/uni_scheduler.h"
 #include "db/version_edit.h"
 #include "env/file_system_tracer.h"
 #include "port/port.h"

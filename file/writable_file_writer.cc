@@ -931,7 +931,7 @@ IOStatus WritableFileWriter::GetIOCtx(SBCIOContex *io_ctx) {
   IOOptions io_options;
   io_ctx->fd_ = writable_file_->GetFD();
   io_ctx->data_ = Slice(src, left);
-  io_ctx->write_offset_ = write_offset;
+  io_ctx->offset_ = write_offset;
   io_ctx->leftover_tail_ = leftover_tail;
   io_ctx->file_advance_ = file_advance;
   return s;

@@ -104,3 +104,5 @@ test_sh_sbc
 test_sh_ycsb
 
 test_databases
+
+*.sh

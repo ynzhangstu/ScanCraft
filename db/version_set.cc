@@ -944,7 +944,7 @@ class LevelIterator final : public InternalIterator {
       const std::vector<AtomicCompactionUnitBoundary>* compaction_boundaries =
           nullptr,
       bool allow_unprepared_value = false,
-      TruncatedRangeDelIterator**** range_tombstone_iter_ptr_ = nullptr)
+      TruncatedRangeDelIterator**** range_tombstone_iter_ptr_ = nullptr, SBCContex sbc_ctx = SBCContex())
       : table_cache_(table_cache),
         read_options_(read_options),
         file_options_(file_options),
@@ -964,7 +964,8 @@ class LevelIterator final : public InternalIterator {
         compaction_boundaries_(compaction_boundaries),
         is_next_read_sequential_(false),
         range_tombstone_iter_(nullptr),
-        to_return_sentinel_(false) {
+        to_return_sentinel_(false),
+        sbc_ctx_(sbc_ctx) {
     // Empty level is not supported.
     assert(flevel_ != nullptr && flevel_->num_files > 0);
     if (range_tombstone_iter_ptr_) {
@@ -1112,7 +1113,7 @@ class LevelIterator final : public InternalIterator {
         nullptr /* don't need reference to table */, file_read_hist_, caller_,
         /*arena=*/nullptr, skip_filters_, level_,
         /*max_file_size_for_l0_meta_pin=*/0, smallest_compaction_key,
-        largest_compaction_key, allow_unprepared_value_, range_tombstone_iter_);
+        largest_compaction_key, allow_unprepared_value_, range_tombstone_iter_, sbc_ctx_.disable_sbc_iter);
   }
 
   // Check if current file being fully within iterate_lower_bound.
@@ -1190,6 +1191,7 @@ class LevelIterator final : public InternalIterator {
   // will not move to next file when this flag is set.
   bool prefix_exhausted_ = false;
   bool from_comp_sst_ = false;
+  SBCContex sbc_ctx_;
 };
 
 void LevelIterator::TrySetDeleteRangeSentinel(const Slice& boundary_key) {
@@ -1905,26 +1907,29 @@ double VersionStorageInfo::GetEstimatedCompressionRatioAtLevel(
 void Version::AddIterators(const ReadOptions& read_options,
                            const FileOptions& soptions,
                            MergeIteratorBuilder* merge_iter_builder,
-                           bool allow_unprepared_value, bool all_from_comp_sst) {
+                           bool allow_unprepared_value, SBCContex &sbc_ctx) {
   assert(storage_info_.finalized_);
-  bool from_comp_sst;
+
   for (int level = 0; level < storage_info_.num_non_empty_levels(); level++) {
-    if(all_from_comp_sst) {
-      from_comp_sst = true;
-    } else if(level > 0) {
-      from_comp_sst = true;
+    // 这里要判断对应的层是否要做合并
+    if(sbc_ctx.sbc_start_level <= level && level <= sbc_ctx.sbc_end_level) {
+      sbc_ctx.from_comp_sst = true;
     } else {
-      from_comp_sst = false;
+      sbc_ctx.from_comp_sst = false;
+    }
+    // TODO: 这里要判断对应的层是否要绕过cache
+    if(level <= sbc_ctx.boundary) {
+      sbc_ctx.disable_sbc_iter = true;
     }
     AddIteratorsForLevel(read_options, soptions, merge_iter_builder, level,
-                         allow_unprepared_value, from_comp_sst);
+                         allow_unprepared_value, sbc_ctx);
   }
 }
 
 void Version::AddIteratorsForLevel(const ReadOptions& read_options,
                                    const FileOptions& soptions,
                                    MergeIteratorBuilder* merge_iter_builder,
-                                   int level, bool allow_unprepared_value, bool from_comp_sst) {
+                                   int level, bool allow_unprepared_value, SBCContex &sbc_ctx) {
   assert(storage_info_.finalized_);
   if (level >= storage_info_.num_non_empty_levels()) {
     // This is an empty level
@@ -1951,8 +1956,10 @@ void Version::AddIteratorsForLevel(const ReadOptions& read_options,
           /*skip_filters=*/false, /*level=*/0, max_file_size_for_l0_meta_pin_,
           /*smallest_compaction_key=*/nullptr,
           /*largest_compaction_key=*/nullptr, allow_unprepared_value,
-          &tombstone_iter);
-      table_iter->SetFromCompSST(from_comp_sst);
+          &tombstone_iter, sbc_ctx.disable_sbc_iter);
+      if(sbc_ctx.all_from_comp_sst) {
+        table_iter->SetFromCompSST(true);
+      }
       if (read_options.ignore_range_deletions) {
         merge_iter_builder->AddIterator(table_iter);
       } else {
@@ -1983,7 +1990,7 @@ void Version::AddIteratorsForLevel(const ReadOptions& read_options,
         TableReaderCaller::kUserIterator, IsFilterSkipped(level), level,
         /*range_del_agg=*/nullptr, /*compaction_boundaries=*/nullptr,
         allow_unprepared_value, &tombstone_iter_ptr);
-    level_iter->SetFromCompSST(from_comp_sst);
+    level_iter->SetFromCompSST(sbc_ctx.from_comp_sst);
     if (read_options.ignore_range_deletions) {
       merge_iter_builder->AddIterator(level_iter);
     } else {
@@ -2086,7 +2093,7 @@ VersionStorageInfo::VersionStorageInfo(
       estimated_compaction_needed_bytes_(0),
       finalized_(false),
       force_consistency_checks_(_force_consistency_checks),
-      sbc_start_(2),
+      sbc_start_(10),
       sbc_end_(std::max(num_levels_-1, sbc_start_)),
       max_profile_(0) {
   if (ref_vstorage != nullptr) {
@@ -3200,29 +3207,29 @@ void VersionStorageInfo::EstimateCompactionBytesNeeded(
     }
   }
 
-  uint64_t cn[10] = {0};
+  // NOTE: 用于之后CMS判断哪几层要绕过cache  
+  for (int level = 0; level < num_levels_; level++) {
+    level_size_arr_[level] = level_size_arr[level];
+  }
+
+  // FIXME: 合并模型是找到几个需要连续合并的level
+  int64_t cn[10] = {0};
+  int64_t sum = 0;
   int max_none_empty_level = num_levels_;
 
   // 计算每层堆积的合并任务, 计算L1-L5， L6理论上不存在堆积的合并任务
-  for (int level = base_level(); level < num_levels_ - 1; level++) { 
-    cn[level] = std::max(0ul, 
-      (level_size_arr[level] - MaxBytesForLevel(level)) * (1 + level_size_arr[level + 1] / (1 + level_size_arr[level])));
-    if (level_size_arr[level + 1]) {
-      // NOTE: +1代表下一层的偏移[0, 1, 2, 3, 4, 5, 6]，再+1代表下一层的层数[1, 2, 3, 4, 5, 6, 7]
-      max_none_empty_level = level + 1;
-    }
+  for (int level = base_level(); level < num_levels_; level++) { 
+    sum += (level_size_arr[level] - MaxBytesForLevel(level));
+    cn[level] = sum;
   }
+  
   int max_profile = 0;
   int sbc_start = sbc_start_;
   int sbc_end = sbc_end_;
 
-  for (int j = base_level(); j < max_none_empty_level-1; j++) {
-    for(int k = j + 1; k < max_none_empty_level; k++) {
-      int profile_ = 0;
-      for (int i = j; i < k; i++) {
-        profile_ += (cn[i] - level_size_arr[i]);
-      }
-      profile_ -= level_size_arr[k];
+  for (int j = 1; j < num_levels_-1; j++) {
+    for(int k = j + 1; k < num_levels_; k++) {
+      int profile_ = cn[k-1] - cn[j-1];
       if(profile_ > max_profile) {
         max_profile = profile_;
         sbc_start = j;
@@ -3451,6 +3458,17 @@ void VersionStorageInfo::ComputeCompactionScore(
 void VersionStorageInfo::GetSBCLevelRange(int& start, int& end) {
   start = sbc_start_;
   end = sbc_end_;
+}
+
+void VersionStorageInfo::GetCMSboundary(uint64_t hot_spot_size, int &boundary) {
+  uint64_t sum_levels = 0;
+  for (int level = 0; level < num_levels_; level++) {
+    sum_levels += level_size_arr_[level];
+    if(sum_levels > hot_spot_size) {
+      boundary = level;
+      break;
+    }
+  }
 }
 
 void VersionStorageInfo::ComputeFilesMarkedForCompaction() {

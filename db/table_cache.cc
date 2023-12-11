@@ -95,7 +95,7 @@ TableCache::TableCache(const ImmutableOptions& ioptions,
       block_cache_tracer_(block_cache_tracer),
       loader_mutex_(kLoadConcurency, kGetSliceNPHash64UnseededFnPtr),
       io_tracer_(io_tracer),
-      db_session_id_(db_session_id) {
+      db_session_id_(db_session_id), hit_cache_cnt(0), access_cache_cnt(0) {
   if (ioptions_.row_cache) {
     // If the same cache is shared by multiple instances, we need to
     // disambiguate its entries.
@@ -197,6 +197,7 @@ Status TableCache::FindTable(
   uint64_t number = file_meta.fd.GetNumber();
   Slice key = GetSliceForFileNumber(&number);
   *handle = cache_->Lookup(key);
+  access_cache_cnt++;
   TEST_SYNC_POINT_CALLBACK("TableCache::FindTable:0",
                            const_cast<bool*>(&no_io));
 
@@ -208,6 +209,7 @@ Status TableCache::FindTable(
     // We check the cache again under loading mutex
     *handle = cache_->Lookup(key);
     if (*handle != nullptr) {
+      hit_cache_cnt++;
       return Status::OK();
     }
 
@@ -232,6 +234,8 @@ Status TableCache::FindTable(
       }
     }
     return s;
+  } else {
+    hit_cache_cnt++;
   }
   return Status::OK();
 }
@@ -246,7 +250,7 @@ InternalIterator* TableCache::NewIterator(
     size_t max_file_size_for_l0_meta_pin,
     const InternalKey* smallest_compaction_key,
     const InternalKey* largest_compaction_key, bool allow_unprepared_value,
-    TruncatedRangeDelIterator** range_del_iter) {
+    TruncatedRangeDelIterator** range_del_iter, bool disable_sbc_iter) {
   PERF_TIMER_GUARD(new_table_iterator_nanos);
 
   Status s;
@@ -275,8 +279,9 @@ InternalIterator* TableCache::NewIterator(
         !options.table_filter(*table_reader->GetTableProperties())) {
       result = NewEmptyInternalIterator<Slice>(arena);
     } else {
-      result = table_reader->NewIterator(
-          options, prefix_extractor.get(), arena, skip_filters, caller,
+      // NOTE: 
+      result = table_reader->NewIteratorCMS(
+          options, prefix_extractor.get(), arena, skip_filters, caller, disable_sbc_iter,
           file_options.compaction_readahead_size, allow_unprepared_value);
     }
     if (handle != nullptr) {

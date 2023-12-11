@@ -827,6 +827,10 @@ class FSRandomAccessFile {
     return IOStatus::NotSupported("Prefetch");
   }
 
+  virtual int GetFD() const {
+    abort();
+  }
+
   // Read a bunch of blocks as described by reqs. The blocks can
   // optionally be read in parallel. This is a synchronous call, i.e it
   // should return after all reads have completed. The reads will be

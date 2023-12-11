@@ -2050,10 +2050,12 @@ bool BlockBasedTable::PrefixExtractorChanged(
   }
 }
 
-InternalIterator* BlockBasedTable::NewIterator(
-    const ReadOptions& read_options, const SliceTransform* prefix_extractor,
-    Arena* arena, bool skip_filters, TableReaderCaller caller,
-    size_t compaction_readahead_size, bool allow_unprepared_value) {
+InternalIterator* BlockBasedTable::NewIteratorCMS(const ReadOptions& read_options,
+                                const SliceTransform* prefix_extractor,
+                                Arena* arena, bool skip_filters,
+                                TableReaderCaller caller, bool disable_sbc_iter,
+                                size_t compaction_readahead_size,
+                                bool allow_unprepared_value) {
   BlockCacheLookupContext lookup_context{caller};
   bool need_upper_bound_check =
       read_options.auto_prefix_mode || PrefixExtractorChanged(prefix_extractor);
@@ -2063,7 +2065,7 @@ InternalIterator* BlockBasedTable::NewIterator(
           rep_->index_type == BlockBasedTableOptions::kHashSearch,
       /*input_iter=*/nullptr, /*get_context=*/nullptr, &lookup_context));
   if (arena == nullptr) {
-    if(read_options.fast_scan) {
+    if(read_options.fast_scan && !disable_sbc_iter) {
       return new BlockBasedTableIteratorSBC(
         this, read_options, rep_->internal_comparator, std::move(index_iter),
         !skip_filters && !read_options.total_order_seek &&
@@ -2079,7 +2081,7 @@ InternalIterator* BlockBasedTable::NewIterator(
         compaction_readahead_size, allow_unprepared_value);
   } else {
     char* mem = nullptr;
-    if(read_options.fast_scan) {
+    if(read_options.fast_scan && !disable_sbc_iter) {
       mem = arena->AllocateAligned(sizeof(BlockBasedTableIteratorSBC));
       return new (mem) BlockBasedTableIteratorSBC(
         this, read_options, rep_->internal_comparator, std::move(index_iter),
@@ -2096,6 +2098,15 @@ InternalIterator* BlockBasedTable::NewIterator(
         need_upper_bound_check, prefix_extractor, caller,
         compaction_readahead_size, allow_unprepared_value);
   }
+
+}
+
+InternalIterator* BlockBasedTable::NewIterator(
+    const ReadOptions& read_options, const SliceTransform* prefix_extractor,
+    Arena* arena, bool skip_filters, TableReaderCaller caller,
+    size_t compaction_readahead_size, bool allow_unprepared_value) {
+  return NewIteratorCMS(read_options, prefix_extractor, arena, skip_filters,
+                caller, false, compaction_readahead_size, allow_unprepared_value);
 }
 
 FragmentedRangeTombstoneIterator* BlockBasedTable::NewRangeTombstoneIterator(
