@@ -1561,16 +1561,6 @@ if(WITH_BENCHMARK_TOOLS)
   target_link_libraries(db_bench_my2
     ${ROCKSDB_LIB} ${GFLAGS_LIB} -lpthread gtest)
 
-  add_executable(scan_based_compaction_test
-    tools/scan_based_compaction_test.cc)
-  target_link_libraries(scan_based_compaction_test
-    ${ROCKSDB_LIB} ${GFLAGS_LIB} -lpthread gtest)
-
-  add_executable(sbc_bench
-    tools/sbc_bench.cc)
-  target_link_libraries(sbc_bench
-    ${ROCKSDB_LIB} ${GFLAGS_LIB} -lpthread gtest)
-
   add_executable(aio_test
     tools/aio_test.cc)
   target_link_libraries(aio_test -lpthread gtest)
@@ -1647,17 +1637,6 @@ include_directories(third_party/HdrHistogram_c/include)
 add_compile_definitions(HDRMEASUREMENT)
 
 
-add_executable(ycsb
-  YCSB-cpp/rocksdb/rocksdb_db.cc
-  YCSB-cpp/core/acknowledged_counter_generator.cc
-  YCSB-cpp/core/basic_db.cc
-  YCSB-cpp/core/core_workload.cc
-  YCSB-cpp/core/db_factory.cc
-  YCSB-cpp/core/measurements.cc
-  YCSB-cpp/core/ycsbc.cc)
-add_dependencies(ycsb hdr_histogram_static)
-target_link_libraries(ycsb
-${ROCKSDB_LIB} -lpthread hdr_histogram_static)
 
 add_executable(block_based_table_reader_meta_test table/block_based_table_reader_meta_test.cc)
 target_compile_definitions(block_based_table_reader_meta_test PRIVATE DISP_BLOCK_KEY)
@@ -1674,7 +1653,3 @@ target_link_libraries(uni_scheduler_test ${ROCKSDB_LIB} -lpthread)
 # set_target_properties(block_based_table_reader_meta_test PROPERTIES COMPILE_DEFINITIONS DISP_BLOCK_KEY)
 
 # add_definitions(-DDISP_BLOCK_KEY)
-
-
-add_executable(test_io_uring util/test_io_uring.cc)
-target_link_libraries(test_io_uring -luring)
